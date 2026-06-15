@@ -274,6 +274,33 @@ export async function execVerb(
   );
 }
 
+// Run an exec and, unlike the budgeted single-shot execVerb the MCP face uses,
+// block until it reaches a terminal state by polling wait. A hand-run CLI exec
+// has no client deadline to beat, so a long build is awaited to its real exit
+// code instead of handing back a runId the caller must wait on. A ready dev
+// server is terminal here, so a --ready-when watch returns once it is up rather
+// than blocking on a process that never exits. waitVerb re-checks a persisted
+// readyWhen on each poll, so a watch resolves to ready and a plain command to
+// completed through the same loop.
+export async function execToCompletionVerb(
+  options: {
+    codespace?: string;
+    cwd?: string;
+    command?: string | string[];
+    scriptFile?: string;
+    readyWhen?: string;
+  },
+  deps: ExecDeps = realExecDeps,
+  waitDeps: WaitDeps = realWaitDeps,
+  run: RemoteRunner = runInCodespace,
+): Promise<ExecResult> {
+  let result = await execVerb(options, deps);
+  while (result.status === "running") {
+    result = await waitVerb({ codespace: result.codespace, runId: result.runId }, waitDeps, run);
+  }
+  return result;
+}
+
 // A rush result mirrors an exec result but is rush-flavored: it records which
 // subcommand ran, whether it is a long-lived watch or a one-shot build, and the
 // port a watch serves on, so the agent never has to re-derive any of that from
@@ -345,6 +372,46 @@ export async function rushVerb(
     return { ...base, status: "ready", runDir: exec.runDir, stdout: exec.stdout, failures: exec.failures, deploy };
   }
   return { ...base, status: "running", runDir: exec.runDir };
+}
+
+// Run rush and block until it reaches a terminal state, the CLI default so a
+// hand-run rush build is awaited to its real exit code the same as running it in
+// the codespace yourself. A watch is terminal once it is ready, so it returns
+// while still serving; only a run-to-completion subcommand is polled to done.
+export async function rushToCompletionVerb(
+  options: { codespace?: string; cwd?: string; subcommand: string; to: string[]; port?: number; extra?: string[] },
+  deps: ExecDeps = realExecDeps,
+  waitDeps: WaitDeps = realWaitDeps,
+  run: RemoteRunner = runInCodespace,
+): Promise<RushResult> {
+  const initial = await rushVerb(options, deps, run);
+  if (initial.status !== "running") {
+    return initial;
+  }
+  let collected = await waitVerb({ codespace: initial.codespace, runId: initial.runId }, waitDeps, run);
+  while (collected.status === "running") {
+    collected = await waitVerb({ codespace: collected.codespace, runId: collected.runId }, waitDeps, run);
+  }
+  return rushResultFromCollected(collected, initial);
+}
+
+// Re-wrap a collected exec result back into rush framing so a blocked rush run is
+// presented exactly like one that finished inside the budget. The rush provenance
+// rides along on the wait result from the run record, so the subcommand, mode,
+// and port are recovered without re-deriving them from the argv, with the initial
+// rush framing as the fallback.
+function rushResultFromCollected(collected: ExecCompleted | ExecReady, initial: RushResult): RushResult {
+  const base = {
+    codespace: collected.codespace,
+    runId: collected.runId,
+    subcommand: collected.rush?.subcommand ?? initial.subcommand,
+    mode: collected.rush?.mode ?? initial.mode,
+    port: collected.rush?.port ?? initial.port,
+  };
+  if (collected.status === "completed") {
+    return { ...base, status: "completed", exitCode: collected.exitCode, stdout: collected.stdout, stderr: collected.stderr, failures: collected.failures };
+  }
+  return { ...base, status: "ready", runDir: collected.runDir, stdout: collected.stdout, failures: collected.failures, deploy: collected.deploy };
 }
 
 // The exit code a finished or backgrounded run maps to for a shell caller. A

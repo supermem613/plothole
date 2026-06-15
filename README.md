@@ -54,7 +54,7 @@ Codespace verbs, hand-runnable for debugging (each is also an MCP tool):
 plothole session --ensure <codespace-name>   # set the active codespace first
 plothole session --set-root /workspaces/app   # scope every verb to one repo root
 plothole env
-plothole exec -- rush build                   # returns a runId if it runs long
+plothole exec -- rush build                   # blocks until it finishes; --background returns a runId
 plothole exec -- 'cd src && rush build | tee log'   # a quoted single arg runs as a shell line
 plothole exec --script-file ./build.sh        # run a host script file (best for gnarly scripts)
 plothole exec --ready-when log:'Waiting for changes' -- rush start   # return once a dev server is serving
@@ -133,20 +133,27 @@ the verbs in `src/core/verbs.ts`, so the two surfaces cannot drift.
 
 ## Backgrounding long commands
 
-The MCP client abandons a tool call after roughly 60 seconds, so `exec` never
-blocks on a long build. Every command is launched detached inside the codespace
-and polled for up to a fixed 45-second budget, which sits under that timeout
-with headroom for the ssh round trip and base64 transfer. A command that
-finishes in time returns `{ "status": "completed", "exitCode", "stdout",
-"stderr", "runId" }`. One that is still running returns `{ "status": "running",
-"runId" }`; call `wait` with that `runId` to collect it once it finishes (call
-`wait` again if it is still going), and `runs` to recover a `runId` you lost. Run
-`logs <runId>` to tail a running exec's stdout and stderr without collecting it,
-so you can watch a long build's progress and read its log markers, then decide to
-wait or kill. The real exit code is recovered even though `gh cs ssh` collapses
-nonzero codes. Run `clean` to prune tracked runs that already finished but were
-never waited on; it leaves a still-running exec untouched. Run `kill <runId>` to
-stop a runaway exec and its subprocesses.
+On the CLI, `exec` and `rush` are synchronous by default: they block until the
+command finishes and exit with its real code, exactly like running it in the
+codespace yourself. A `--ready-when` dev server is the exception, returning once
+it is serving while the process keeps running. Pass `--background` (`-b`) to opt
+into the fire-and-poll behavior below, where a long command hands back a `runId`
+immediately for you to `wait` on.
+
+The MCP face is always fire-and-poll, because the MCP client abandons a tool call
+after roughly 60 seconds, so `exec` never blocks on a long build there. Every
+command is launched detached inside the codespace and polled for up to a fixed
+45-second budget, which sits under that timeout with headroom for the ssh round
+trip and base64 transfer. A command that finishes in time returns `{ "status":
+"completed", "exitCode", "stdout", "stderr", "runId" }`. One that is still running
+returns `{ "status": "running", "runId" }`; call `wait` with that `runId` to
+collect it once it finishes (call `wait` again if it is still going), and `runs`
+to recover a `runId` you lost. Run `logs <runId>` to tail a running exec's stdout
+and stderr without collecting it, so you can watch a long build's progress and
+read its log markers, then decide to wait or kill. The real exit code is recovered
+even though `gh cs ssh` collapses nonzero codes. Run `clean` to prune tracked runs
+that already finished but were never waited on; it leaves a still-running exec
+untouched. Run `kill <runId>` to stop a runaway exec and its subprocesses.
 
 A transient `gh cs ssh` channel drop (for example "error reading server preface"
 or "use of closed network connection") is retried automatically a few times, so a

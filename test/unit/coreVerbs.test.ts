@@ -1,7 +1,7 @@
 import { describe, it, beforeEach } from "node:test";
 import { strict as assert } from "node:assert";
 import { writeState, recordRun, getRun, type RunRecord } from "../../src/core/state.js";
-import { waitVerb, logsVerb, cleanVerb, execVerb, rushVerb, rushExitCode, execExitCode, checkSpfxDeploy } from "../../src/core/verbs.js";
+import { waitVerb, logsVerb, cleanVerb, execVerb, execToCompletionVerb, rushVerb, rushToCompletionVerb, rushExitCode, execExitCode, checkSpfxDeploy } from "../../src/core/verbs.js";
 import type { AsyncRunOutcome, LogsOutcome } from "../../src/core/asyncRun.js";
 import type { RemoteResult } from "../../src/core/transport.js";
 
@@ -191,6 +191,108 @@ describe("execVerb readiness persistence", () => {
     const result = await execVerb({ codespace: "cs1", command: "sleep 999" }, deps);
     assert.equal(result.status, "running");
     assert.equal(getRun(result.runId)?.readyWhen, undefined);
+  });
+});
+
+describe("execToCompletionVerb", () => {
+  beforeEach(() => writeState({}));
+
+  it("blocks a backgrounded exec to its completed result instead of handing back a running handle", async () => {
+    const deps = {
+      exec: async (): Promise<AsyncRunOutcome> => ({ status: "running" }),
+      execReady: async (): Promise<AsyncRunOutcome> => ({ status: "running" }),
+    };
+    const waitDeps = {
+      wait: async (): Promise<AsyncRunOutcome> => ({ status: "done", exitCode: 3, stdout: "out", stderr: "err" }),
+      readyWait: async (): Promise<AsyncRunOutcome> => ({ status: "done", exitCode: 3, stdout: "out", stderr: "err" }),
+    };
+    const result = await execToCompletionVerb({ codespace: "cs1", command: "rush build" }, deps, waitDeps);
+    assert.equal(result.status, "completed");
+    assert.equal(result.status === "completed" ? result.exitCode : undefined, 3, "the real exit code survives the block");
+    assert.equal(getRun(result.runId), undefined, "a collected run is no longer tracked");
+  });
+
+  it("returns an inline-completed exec without polling wait", async () => {
+    let waited = false;
+    const deps = {
+      exec: async (): Promise<AsyncRunOutcome> => ({ status: "done", exitCode: 0, stdout: "ok", stderr: "" }),
+      execReady: async (): Promise<AsyncRunOutcome> => ({ status: "done", exitCode: 0, stdout: "ok", stderr: "" }),
+    };
+    const waitDeps = {
+      wait: async (): Promise<AsyncRunOutcome> => {
+        waited = true;
+        return { status: "running" };
+      },
+      readyWait: async (): Promise<AsyncRunOutcome> => {
+        waited = true;
+        return { status: "running" };
+      },
+    };
+    const result = await execToCompletionVerb({ codespace: "cs1", command: "echo hi" }, deps, waitDeps);
+    assert.equal(result.status, "completed");
+    assert.equal(waited, false, "a command that finished in the first call must not poll wait");
+  });
+
+  it("treats a ready dev server as terminal so a watch returns once up instead of blocking on a process that never exits", async () => {
+    const deps = {
+      exec: async (): Promise<AsyncRunOutcome> => ({ status: "running" }),
+      execReady: async (): Promise<AsyncRunOutcome> => ({ status: "running" }),
+    };
+    const waitDeps = {
+      wait: async (): Promise<AsyncRunOutcome> => ({ status: "running" }),
+      readyWait: async (): Promise<AsyncRunOutcome> => ({ status: "ready", stdout: "Waiting for changes\n" }),
+    };
+    const result = await execToCompletionVerb({ codespace: "cs1", command: "rush start", readyWhen: "tcp:46435" }, deps, waitDeps);
+    assert.equal(result.status, "ready", "a ready watch is terminal for the blocking path");
+  });
+});
+
+describe("rushToCompletionVerb", () => {
+  beforeEach(() => writeState({}));
+
+  const FAILED_BUILD = [
+    "==[ FAILURE: 1 operation ]=====================================================",
+    "--[ FAILURE: @scope/pages (_phase_build) ]-------------------[ 1.23 seconds ]--",
+    "  error TS1005",
+  ].join("\n");
+
+  it("blocks a backgrounded build to its completed result and keeps the rush framing and failures", async () => {
+    const deps = {
+      exec: async (): Promise<AsyncRunOutcome> => ({ status: "running" }),
+      execReady: async (): Promise<AsyncRunOutcome> => ({ status: "running" }),
+    };
+    const waitDeps = {
+      wait: async (): Promise<AsyncRunOutcome> => ({ status: "done", exitCode: 1, stdout: FAILED_BUILD, stderr: "" }),
+      readyWait: async (): Promise<AsyncRunOutcome> => ({ status: "done", exitCode: 1, stdout: FAILED_BUILD, stderr: "" }),
+    };
+    const result = await rushToCompletionVerb({ codespace: "cs1", subcommand: "build", to: ["@scope/app"] }, deps, waitDeps);
+    assert.equal(result.status, "completed");
+    assert.equal(result.subcommand, "build");
+    assert.equal(result.mode, "once");
+    assert.equal(result.exitCode, 1);
+    assert.ok(result.failures, "a failed sub-build must still surface after the block");
+    assert.equal(rushExitCode(result), 1);
+  });
+
+  it("returns an inline-ready watch unchanged without polling wait", async () => {
+    let waited = false;
+    const deps = {
+      exec: async (): Promise<AsyncRunOutcome> => ({ status: "running" }),
+      execReady: async (): Promise<AsyncRunOutcome> => ({ status: "ready", stdout: "Waiting for changes\n" }),
+    };
+    const waitDeps = {
+      wait: async (): Promise<AsyncRunOutcome> => {
+        waited = true;
+        return { status: "running" };
+      },
+      readyWait: async (): Promise<AsyncRunOutcome> => {
+        waited = true;
+        return { status: "running" };
+      },
+    };
+    const result = await rushToCompletionVerb({ codespace: "cs1", subcommand: "start", to: ["@scope/app"] }, deps, waitDeps);
+    assert.equal(result.status, "ready");
+    assert.equal(waited, false, "a watch that reached ready in the first call must not poll wait");
   });
 });
 

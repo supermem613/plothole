@@ -74,7 +74,7 @@ program
 
 program
   .command("exec [command...]")
-  .description("Run a command inside the active codespace; returns its exit code, or a runId if it runs long")
+  .description("Run a command inside the active codespace and wait for it to finish, returning its exit code")
   .option("--cs, --codespace <name>", "Override the active codespace name")
   .option("--cwd <dir>", "Working directory inside the codespace")
   .option("--script-file <file>", "Run this host script file as a shell line in the codespace")
@@ -82,7 +82,8 @@ program
     "--ready-when <spec>",
     "Return once a readiness condition holds while leaving the process running: tcp:PORT or log:REGEX",
   )
-  .action((command: string[] | undefined, opts: { codespace?: string; cwd?: string; scriptFile?: string; readyWhen?: string }) =>
+  .option("-b, --background", "Return a runId immediately instead of blocking until the command finishes")
+  .action((command: string[] | undefined, opts: { codespace?: string; cwd?: string; scriptFile?: string; readyWhen?: string; background?: boolean }) =>
     execCommand(command ?? [], opts),
   );
 
@@ -216,8 +217,9 @@ program
   .option("--extra <arg>", "Extra raw rush arg appended after the selectors and port; repeat for each", collectArg, [])
   .option("--cwd <dir>", "Working directory inside the codespace (defaults to the codespace root)")
   .option("--cs, --codespace <name>", "Override the active codespace name")
+  .option("-b, --background", "Return a runId immediately instead of blocking until a build finishes")
   .action(
-    (subcommand: string, opts: { to: string[]; port?: string; extra: string[]; cwd?: string; codespace?: string }) =>
+    (subcommand: string, opts: { to: string[]; port?: string; extra: string[]; cwd?: string; codespace?: string; background?: boolean }) =>
       rushCommand(subcommand, opts),
   );
 

@@ -113,4 +113,7 @@ Prefer these over the host shell or a raw `gh cs ssh` call:
 Run `plothole doctor` (the CLI, on the host) to check the gh account and scope,
 codespace reachability, and the toolchain. The CLI exposes the same verbs for
 hand-debugging, for example `plothole exec -- rush build` or
-`plothole wait <runId>`.
+`plothole wait <runId>`. The CLI `exec` and `rush` verbs are synchronous by
+default: they block until the command finishes and exit with its real code, with
+a `--ready-when` dev server returning once it is serving. Pass `--background`
+(`-b`) for the fire-and-poll handle behavior the MCP tools always use.

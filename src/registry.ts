@@ -95,7 +95,7 @@ export const commandSpecs: CommandSpec[] = [
   },
   {
     path: ["exec"],
-    summary: "Run a command inside the active codespace; returns its exit code, or a runId if it runs long.",
+    summary: "Run a command inside the active codespace and wait for it to finish, returning its exit code.",
     effect: "mutate-remote",
     input: {
       positionals: ["command"],
@@ -108,10 +108,11 @@ export const commandSpecs: CommandSpec[] = [
           type: "string",
           summary: "Return once a readiness condition holds while the process keeps running: tcp:PORT or log:REGEX.",
         },
+        { name: "--background", type: "boolean", summary: "Return a runId immediately instead of blocking until the command finishes (alias -b)." },
       ],
     },
     output: { documented: true, schema: "ExecResult" },
-    examples: ["exec -- rush build", "exec -- 'cd src && rush build'", "exec --cwd packages/foo -- npm test", "exec --script-file ./build.sh", "exec --ready-when tcp:35565 -- rush start"],
+    examples: ["exec -- rush build", "exec -- 'cd src && rush build'", "exec --cwd packages/foo -- npm test", "exec --script-file ./build.sh", "exec --ready-when tcp:35565 -- rush start", "exec --background -- rush build"],
   },
   {
     path: ["wait"],
@@ -279,6 +280,7 @@ export const commandSpecs: CommandSpec[] = [
         { name: "--extra", type: "string", summary: "Extra raw rush arg appended after the selectors and port; repeat for each." },
         { name: "--cwd", type: "string", summary: "Working directory inside the codespace (defaults to the codespace root)." },
         { name: "--codespace", type: "string", summary: "Override the active codespace name (alias --cs)." },
+        { name: "--background", type: "boolean", summary: "Return a runId immediately instead of blocking until a build finishes (alias -b)." },
       ],
     },
     output: { documented: true, schema: "RushResult" },
