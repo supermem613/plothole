@@ -1,6 +1,6 @@
 {
   "name": "plothole",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Drive compile, run, test, and edit inside a GitHub Codespace from the host Copilot CLI",
   "type": "module",
   "bin": {

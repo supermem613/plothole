@@ -45,6 +45,26 @@ const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as { name: string; version
 // routing between host tools and codespace tools cannot confuse the two.
 const WORLD = "Operates INSIDE the active GitHub Codespace; host files and processes are not visible here.";
 
+// Advertised to the client at the MCP initialize handshake so the model learns the
+// world model and lifecycle up front instead of discovering them through failed calls.
+// Each point maps to a contract enforced by the verbs or a host-vs-codespace footgun.
+const PLOTHOLE_INSTRUCTIONS = [
+  "Plothole drives a remote GitHub Codespace. Every tool runs INSIDE the active codespace and cannot see host files or host processes. The one exception is forward, which acts on the host to bridge a codespace port to a host port.",
+  "",
+  "Before other verbs:",
+  "- Set an active codespace with the session tool (ensure) so verbs know where to run. Use setRoot to scope every verb to a workspace directory.",
+  "",
+  "Background and wait lifecycle:",
+  "- exec and rush background any command that runs longer than about 45s and return {status: \"running\", runId}. Collect the result with the wait tool, watch progress with logs, cancel with kill, list tracked runs with runs, and prune finished ones with clean.",
+  "- wait can itself return status running again after about 45s. Call wait again with the same runId until it finishes. Never report success from a still-running handle.",
+  "",
+  "Long-lived services:",
+  "- For a dev server, pass exec readyWhen (\"tcp:PORT\" or \"log:REGEX\"), or use a rush watch subcommand, to get {status: \"ready\", runId} while the process keeps serving. Then use forward to bridge its port so a host browser or curl can reach it.",
+  "",
+  "Rush:",
+  "- Call rush with a subcommand and a to array of selectors. Build FAILURE markers are surfaced as failures even when a watch server came up, so do not treat a ready watch with a failed sub-build as healthy.",
+].join("\n");
+
 // One error boundary for every tool so a failed verb becomes a structured error
 // envelope with a hint rather than an unhandled rejection that drops the MCP
 // connection.
@@ -59,7 +79,10 @@ async function guard(produce: () => Promise<unknown>) {
 }
 
 export function createPlotholeServer(): McpServer {
-  const server = new McpServer({ name: pkg.name, version: pkg.version });
+  const server = new McpServer(
+    { name: pkg.name, version: pkg.version },
+    { instructions: PLOTHOLE_INSTRUCTIONS },
+  );
 
   server.registerTool(
     "exec",
